@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Sheet Scanner">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#111111">
+<title>Answer Sheet Scanner</title>
+<style>
+  :root { --bg:#FAFAFA; --ink:#1b1b1b; --muted:#666; --line:#d6d6d6; --green:#1fa84f; --red:#d93636; --amber:#e49b0f; --blue:#2f7de1; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body { margin:0; height:100%; background:#111; color:var(--ink); font-family:-apple-system, system-ui, "Segoe UI", sans-serif; overflow:hidden; overscroll-behavior:none; }
+  button { font:inherit; border:0; border-radius:10px; padding:10px 14px; background:#fff; color:var(--ink); cursor:pointer; }
+  button:active { opacity:.7; }
+  button.primary { background:var(--blue); color:#fff; font-weight:600; }
+  button.good { background:var(--green); color:#fff; font-weight:600; }
+  button.ghost { background:rgba(255,255,255,.18); color:#fff; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+  button.danger { background:#fbe3e3; color:#a21f1f; }
+  input[type=text], select { font:inherit; padding:9px 10px; border-radius:10px; border:1px solid var(--line); background:#fff; color:var(--ink); min-width:0; }
+  .hidden { display:none !important; }
+  .screen { position:fixed; inset:0; height:100dvh; }
+
+  /* ---- scan screen ---- */
+  #scan { background:#000; }
+  #live { position:absolute; inset:0; width:100%; height:100%; display:block; }
+  #vid { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+  #topbar { z-index:6; position:absolute; top:0; left:0; right:0; padding:calc(env(safe-area-inset-top) + 8px) 10px 8px; display:flex; gap:8px; align-items:center;
+            background:linear-gradient(#000a, #0000); }
+  #topbar input { flex:1; background:rgba(255,255,255,.92); }
+  #keyBtn { max-width:42vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #status { position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom) + 112px); text-align:center; color:#fff; font-size:15px; text-shadow:0 1px 4px #000; padding:0 20px; pointer-events:none; }
+  #prog { position:absolute; left:20%; right:20%; bottom:calc(env(safe-area-inset-bottom) + 100px); height:5px; border-radius:3px; background:#fff3; overflow:hidden; }
+  #progFill { height:100%; width:0; background:var(--green); }
+  #bottombar { z-index:6; position:absolute; left:0; right:0; bottom:0; padding:12px 18px calc(env(safe-area-inset-bottom) + 14px); display:flex; align-items:center; justify-content:space-around;
+               background:linear-gradient(#0000, #000b); }
+  #shutter { width:68px; height:68px; border-radius:50%; background:#fff; border:5px solid #ffffff88; background-clip:padding-box; padding:0; }
+  #startOverlay { z-index:5; position:absolute; inset:0; display:flex; flex-direction:column; gap:14px; align-items:center; justify-content:center; background:#000d; color:#fff; text-align:center; padding:30px; }
+  #startOverlay p { max-width:320px; line-height:1.4; margin:0; color:#ddd; }
+
+  /* ---- result screen ---- */
+  #result { background:var(--bg); display:flex; flex-direction:column; }
+  #rhead { padding:calc(env(safe-area-inset-top) + 8px) 12px 8px; background:#fff; border-bottom:1px solid var(--line); }
+  #rtotal { display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; }
+  #rscore { font-size:40px; font-weight:800; line-height:1; }
+  #rscore small { font-size:20px; font-weight:600; color:var(--muted); }
+  #rstats { font-size:14px; color:var(--muted); }
+  #rstats b.g { color:var(--green); } #rstats b.r { color:var(--red); } #rstats b.a { color:var(--amber); }
+  #rid { margin-top:8px; display:flex; gap:8px; align-items:center; }
+  #rid input { flex:1; }
+  #rhint { font-size:12px; color:var(--muted); margin-top:6px; }
+  #rscroll { flex:1; overflow:auto; -webkit-overflow-scrolling:touch; padding:8px; }
+  #rcanvas { width:100%; height:auto; display:block; background:#fff; box-shadow:0 0 0 1px var(--line); touch-action:manipulation; }
+  #rfoot { display:flex; gap:8px; padding:10px 12px calc(env(safe-area-inset-bottom) + 10px); background:#fff; border-top:1px solid var(--line); }
+  #rfoot button { flex:1; border:1px solid var(--line); }
+  #rfoot button.primary, #rfoot button.good { border:0; flex:1.6; }
+
+  /* ---- panels ---- */
+  .panel { position:fixed; inset:0; height:100dvh; background:var(--bg); display:flex; flex-direction:column; z-index:30; }
+  .panel header { display:flex; align-items:center; gap:10px; padding:calc(env(safe-area-inset-top) + 10px) 12px 10px; background:#fff; border-bottom:1px solid var(--line); }
+  .panel header h2 { margin:0; font-size:18px; flex:1; }
+  .panel .body { flex:1; overflow:auto; padding:12px; -webkit-overflow-scrolling:touch; }
+  .panel .row { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; align-items:center; }
+  .panel .row > select, .panel .row > input[type=text] { flex:1; }
+  .panel .row button { border:1px solid var(--line); }
+  .panel h3 { margin:16px 0 6px; font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; }
+  #keyGrid { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px 14px; }
+  #keyGrid .col { display:grid; grid-template-columns:repeat(2,1fr); gap:5px; align-content:start; }
+  .kc { display:flex; justify-content:space-between; align-items:center; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:#fff; font-size:15px; user-select:none; }
+  .kc b { font-size:17px; } .kc.unset b { color:#bbb; }
+  .note { font-size:13px; color:var(--muted); line-height:1.45; }
+  table.scans { width:100%; border-collapse:collapse; font-size:14px; background:#fff; }
+  table.scans th, table.scans td { padding:7px 8px; border-bottom:1px solid var(--line); text-align:left; }
+  table.scans td.n { text-align:right; font-variant-numeric:tabular-nums; }
+  #toast { position:fixed; left:50%; top:calc(env(safe-area-inset-top) + 70px); transform:translateX(-50%); background:#000d; color:#fff; padding:9px 16px; border-radius:20px; z-index:50; font-size:15px; pointer-events:none; max-width:86vw; text-align:center; }
+</style>
+</head>
+<body>
+
+<!-- ================= SCAN SCREEN ================= -->
+<div id="scan" class="screen">
+  <video id="vid" playsinline muted autoplay></video>
+  <canvas id="live"></canvas>
+  <div id="topbar">
+    <button id="keyBtn" class="ghost">Key: none</button>
+    <input type="text" id="sid" placeholder="Student / sheet ID" autocomplete="off" autocapitalize="off">
+    <button id="listBtn" class="ghost">0 scans</button>
+  </div>
+  <div id="status">Starting…</div>
+  <div id="prog"><div id="progFill"></div></div>
+  <div id="bottombar">
+    <button id="photoBtn" class="ghost">Photo</button>
+    <button id="shutter" aria-label="Capture now"></button>
+    <button id="torchBtn" class="ghost hidden">Light</button>
+    <span id="torchSpacer" style="width:70px"></span>
+  </div>
+  <div id="startOverlay">
+    <h2 style="margin:0">Answer Sheet Scanner</h2>
+    <p>Point the camera at the two answer columns. Hold the phone upright so Q1 is at the top-left. The sheet is captured automatically when it is steady.</p>
+    <button id="startBtn" class="primary">Start camera</button>
+    <button id="startPhoto" class="ghost">…or choose / take a photo</button>
+  </div>
+</div>
+<input type="file" id="photoInput" accept="image/*" class="hidden">
+<input type="file" id="keyFile" accept=".csv,.txt,text/csv,text/plain" class="hidden">
+
+<!-- ================= RESULT SCREEN ================= -->
+<div id="result" class="screen hidden">
+  <div id="rhead">
+    <div id="rtotal"><div id="rscore">– <small>/ 40</small></div><div id="rstats"></div></div>
+    <div id="rid"><input type="text" id="rsid" placeholder="Student / sheet ID" autocomplete="off" autocapitalize="off"></div>
+    <div id="rhint">Green = correct · Red = wrong (dashed green shows the right answer) · Amber = blank or multiple marks. Tap a box to correct a misread.</div>
+  </div>
+  <div id="rscroll"><canvas id="rcanvas"></canvas></div>
+  <div id="rfoot">
+    <button id="retakeBtn">Retake</button>
+    <button id="shareImgBtn">Image</button>
+    <button id="saveBtn" class="good">Save &amp; next</button>
+  </div>
+</div>
+
+<!-- ================= KEY PANEL ================= -->
+<div id="keyPanel" class="panel hidden">
+  <header><h2>Answer key</h2><button id="keyClose" class="primary">Done</button></header>
+  <div class="body">
+    <div class="row">
+      <select id="keySelect"></select>
+      <button id="keyNew">New</button>
+      <button id="keyDelete" class="danger">Delete</button>
+    </div>
+    <div class="row">
+      <input type="text" id="keyName" placeholder="Key name (e.g. Test 1)">
+      <button id="keyRename">Rename</button>
+    </div>
+    <div class="row">
+      <button id="keyUpload">Upload CSV / text…</button>
+      <button id="keyPaste">Paste…</button>
+      <button id="keyScan" class="primary">Scan a marked sheet as key</button>
+    </div>
+    <div class="note" id="keyStatus"></div>
+    <h3>Tap a number to cycle A → B → C → D → blank</h3>
+    <div id="keyGrid"></div>
+    <h3>Settings</h3>
+    <div class="row"><label for="sens" class="note" style="flex:1">Mark threshold – how much darker than an empty box counts as a mark (lower picks up lighter pencil)<br><span id="sensVal"></span></label>
+      <input type="range" id="sens" min="4" max="30" step="1" style="flex:1"></div>
+    <div class="row"><label class="note"><input type="checkbox" id="autoCap"> Auto-capture when the sheet is steady</label></div>
+    <p class="note">Key files: either 40 letters in one line (<code>BADCA…</code>), a list of letters, or rows like <code>1,B</code>.</p>
+  </div>
+</div>
+
+<!-- ================= SCANS PANEL ================= -->
+<div id="listPanel" class="panel hidden">
+  <header><h2 id="listTitle">Scans</h2><button id="listClose" class="primary">Done</button></header>
+  <div class="body">
+    <div class="row">
+      <button id="csvShare" class="good" style="flex:1">Share CSV…</button>
+      <button id="csvDownload">Download</button>
+    </div>
+    <div class="note" style="margin-bottom:10px">“Share CSV” opens the iOS share sheet: choose <b>Save to Files</b> and pick your folder (it remembers the last one). Scans stay stored here until you clear them.</div>
+    <table class="scans" id="scanTable"></table>
+    <div class="row" style="margin-top:14px">
+      <button id="undoLast">Remove last</button>
+      <button id="clearAll" class="danger">Clear all</button>
+    </div>
+  </div>
+</div>
+<div id="toast" class="hidden"></div>
+
+<script>
+"use strict";
+/* =====================================================================
+   Sheet layout (measured from the supplied template), in reference px.
+   Each table: 277 x 891, 20 rows, four mark boxes (A-D) per row.
+   ===================================================================== */
+const LAYOUT = { TW:277, TH:891, colX:[73.7,130.5,189.1,247.0], row0:37.0, pitch:44.526, boxW:23, boxH:7 };
+const SCALE = 1.5;
+const CW = Math.round(LAYOUT.TW*SCALE), CH = Math.round(LAYOUT.TH*SCALE), GAP = 36;
+const SX = CW/LAYOUT.TW, SY = CH/LAYOUT.TH;
+const LET = "ABCD";
+
+/* ---------- tiny helpers ---------- */
+const $ = id => document.getElementById(id);
+const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+let toastTimer;
+function toast(msg, ms = 2200) { const t = $("toast"); t.textContent = msg; t.classList.remove("hidden"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add("hidden"), ms); }
+
+/* =====================================================================
+   VISION: find the two tables, straighten them, read the marks
+   ===================================================================== */
+function toGray(d, n) { const g = new Uint8ClampedArray(n); for (let i = 0, j = 0; i < n; i++, j += 4) g[i] = (d[j]*77 + d[j+1]*150 + d[j+2]*29) >> 8; return g; }
+
+function darkMask(g, w, h, r, C) {
+  const W1 = w + 1, I = new Uint32Array(W1 * (h + 1));
+  for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += g[y*w + x]; I[(y+1)*W1 + x + 1] = I[y*W1 + x + 1] + row; } }
+  const m = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const y0 = Math.max(0, y - r), y1 = Math.min(h - 1, y + r);
+    for (let x = 0; x < w; x++) {
+      const x0 = Math.max(0, x - r), x1 = Math.min(w - 1, x + r);
+      const area = (x1 - x0 + 1) * (y1 - y0 + 1);
+      const sum = I[(y1+1)*W1 + x1 + 1] - I[y0*W1 + x1 + 1] - I[(y1+1)*W1 + x0] + I[y0*W1 + x0];
+      if (g[y*w + x] * area < sum - C * area) m[y*w + x] = 1;
+    }
+  }
+  return m;
+}
+function dilate(m, w, h) {
+  const t = new Uint8Array(w * h), o = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y*w + x; if (m[i] || (x > 0 && m[i-1]) || (x < w-1 && m[i+1])) t[i] = 1; }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const i = y*w + x; if (t[i] || (y > 0 && t[i-w]) || (y < h-1 && t[i+w])) o[i] = 1; }
+  return o;
+}
+function components(m, w, h, minCount) {
+  const stack = new Int32Array(w * h), out = [];
+  for (let s = 0; s < w * h; s++) {
+    if (m[s] !== 1) continue;
+    let sp = 0; stack[sp++] = s; m[s] = 2;
+    const c = { count:0, minX:w, maxX:0, minY:h, maxY:0, sMin:1e9, sMax:-1e9, dMin:1e9, dMax:-1e9, pTL:null, pBR:null, pTR:null, pBL:null };
+    while (sp) {
+      const i = stack[--sp], x = i % w, y = (i - x) / w;
+      c.count++;
+      if (x < c.minX) c.minX = x; if (x > c.maxX) c.maxX = x; if (y < c.minY) c.minY = y; if (y > c.maxY) c.maxY = y;
+      const sv = x + y, dv = x - y;
+      if (sv < c.sMin) { c.sMin = sv; c.pTL = [x, y]; } if (sv > c.sMax) { c.sMax = sv; c.pBR = [x, y]; }
+      if (dv > c.dMax) { c.dMax = dv; c.pTR = [x, y]; } if (dv < c.dMin) { c.dMin = dv; c.pBL = [x, y]; }
+      for (let dy = -1; dy <= 1; dy++) { const yy = y + dy; if (yy < 0 || yy >= h) continue;
+        for (let dx = -1; dx <= 1; dx++) { const xx = x + dx; if (xx < 0 || xx >= w) continue; const j = yy*w + xx; if (m[j] === 1) { m[j] = 2; stack[sp++] = j; } } }
+    }
+    if (c.count >= minCount) out.push(c);
+  }
+  return out;
+}
+const dist = (a, b) => Math.hypot(a[0]-b[0], a[1]-b[1]);
+
+/* Returns { L:[TL,TR,BR,BL], R:[...] } in the coordinates of g, or null. L = questions 1-20, R = 21-40. */
+function findTables(g, w, h) {
+  const r = Math.max(6, Math.round(Math.max(w, h) / 90));
+  const m = dilate(darkMask(g, w, h, r, 10), w, h);
+  const comps = components(m, w, h, 80).filter(c => {
+    const bw = c.maxX - c.minX + 1, bh = c.maxY - c.minY + 1, a = bh / bw;
+    return bh >= 0.2 * h && a > 1.3 && a < 6;
+  });
+  let best = null, bestScore = 0;
+  for (let i = 0; i < comps.length; i++) for (let j = 0; j < comps.length; j++) {
+    if (i === j) continue;
+    const A = comps[i], B = comps[j];                                  // A = left, B = right
+    const ah = A.maxY - A.minY + 1, bh = B.maxY - B.minY + 1, aw = A.maxX - A.minX + 1;
+    const acx = (A.minX + A.maxX) / 2, bcx = (B.minX + B.maxX) / 2, acy = (A.minY + A.maxY) / 2, bcy = (B.minY + B.maxY) / 2;
+    if (acx >= bcx) continue;
+    const hr = ah / bh; if (hr < 0.75 || hr > 1.33) continue;
+    if (Math.abs(acy - bcy) > 0.15 * Math.max(ah, bh)) continue;
+    const qa = [A.pTL, A.pTR, A.pBR, A.pBL], qb = [B.pTL, B.pTR, B.pBR, B.pBL];
+    const wa = (dist(qa[0], qa[1]) + dist(qa[3], qa[2])) / 2, wb = (dist(qb[0], qb[1]) + dist(qb[3], qb[2])) / 2;
+    const ha = (dist(qa[0], qa[3]) + dist(qa[1], qa[2])) / 2;
+    if (ha / wa < 2.2 || ha / wa > 4.6) continue;                      // template tables are about 3.2 : 1
+    const cd = Math.hypot(bcx - acx, bcy - acy) / ((wa + wb) / 2);
+    if (cd < 1.15 || cd > 1.6) continue;                               // template pitch between tables is about 1.36 widths
+    const score = A.count + B.count;
+    if (score > bestScore) { bestScore = score; best = { L: qa, R: qb }; }
+  }
+  return best;
+}
+
+/* ---------- homography + warp ---------- */
+function solve8(A, b) {
+  const n = 8; for (let i = 0; i < n; i++) A[i].push(b[i]);
+  for (let c = 0; c < n; c++) {
+    let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    [A[c], A[p]] = [A[p], A[c]];
+    for (let r = c + 1; r < n; r++) { const f = A[r][c] / A[c][c]; for (let k = c; k <= n; k++) A[r][k] -= f * A[c][k]; }
+  }
+  const x = new Array(n);
+  for (let i = n - 1; i >= 0; i--) { let s = A[i][n]; for (let k = i + 1; k < n; k++) s -= A[i][k] * x[k]; x[i] = s / A[i][i]; }
+  return x;
+}
+function homography(src, dst) {
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++) { const [u, v] = src[i], [x, y] = dst[i];
+    A.push([u, v, 1, 0, 0, 0, -u*x, -v*x]); b.push(x); A.push([0, 0, 0, u, v, 1, -u*y, -v*y]); b.push(y); }
+  return solve8(A, b);
+}
+function warpTable(sd, sw, sh, quad, W, H) {
+  const hm = homography([[0,0],[W,0],[W,H],[0,H]], quad);
+  const out = new ImageData(W, H), od = out.data;
+  for (let v = 0; v < H; v++) for (let u = 0; u < W; u++) {
+    const du = u + .5, dv = v + .5, den = hm[6]*du + hm[7]*dv + 1;
+    let x = (hm[0]*du + hm[1]*dv + hm[2]) / den - .5, y = (hm[3]*du + hm[4]*dv + hm[5]) / den - .5;
+    if (x < 0) x = 0; else if (x > sw - 1.001) x = sw - 1.001; if (y < 0) y = 0; else if (y > sh - 1.001) y = sh - 1.001;
+    const x0 = x | 0, y0 = y | 0, fx = x - x0, fy = y - y0, i = (y0*sw + x0) * 4, o = (v*W + u) * 4;
+    for (let c = 0; c < 3; c++) {
+      const a = sd[i+c], b2 = sd[i+4+c], c2 = sd[i+sw*4+c], d = sd[i+sw*4+4+c];
+      od[o+c] = (a*(1-fx) + b2*fx)*(1-fy) + (c2*(1-fx) + d*fx)*fy;
+    }
+    od[o+3] = 255;
+  }
+  return out;
+}
+
+/* ---------- mark reading ---------- */
+function windowMedian(g, W, H, x0, y0, x1, y1) {
+  x0 = Math.max(0, x0|0); y0 = Math.max(0, y0|0); x1 = Math.min(W, x1|0); y1 = Math.min(H, y1|0);
+  const hist = new Uint32Array(256); let n = 0;
+  for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { hist[g[y*W + x]]++; n++; }
+  let acc = 0; for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= n / 2) return v; }
+  return 255;
+}
+function rectMean(g, W, H, x0, y0, x1, y1) {
+  x0 = Math.max(0, Math.round(x0)); y0 = Math.max(0, Math.round(y0)); x1 = Math.min(W, Math.round(x1)); y1 = Math.min(H, Math.round(y1));
+  let s = 0, n = 0; for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { s += g[y*W + x]; n++; }
+  return n ? s / n : 255;
+}
+/* darkness of every box: s[q][c] in 0..1 (0 = paper, 1 = black), robust to a couple of pixels of misalignment */
+function readDarkness(g, W, H) {
+  const out = [];
+  for (let q = 0; q < 20; q++) {
+    const row = [], cy = (LAYOUT.row0 + LAYOUT.pitch * q) * SY;
+    for (let c = 0; c < 4; c++) {
+      const cx = LAYOUT.colX[c] * SX;
+      const paper = Math.max(40, windowMedian(g, W, H, cx - 30*SX, cy - 9*SY, cx + 30*SX, cy + 9*SY));
+      const vals = [];
+      for (const dy of [-2, 0, 2]) for (const dx of [-2, 0, 2]) {
+        const m = rectMean(g, W, H, cx + (dx - 7)*SX, cy + (dy - 2)*SY, cx + (dx + 7)*SX, cy + (dy + 2)*SY);
+        vals.push((paper - m) / paper);
+      }
+      vals.sort((a, b) => a - b); row.push(vals[4]);
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+/* ---------- full analysis of a canvas (photo or video frame) ---------- */
+function analyzeCanvas(src) {
+  const w = src.width, h = src.height;
+  const sc = Math.min(1, 1600 / Math.max(w, h)), ww = Math.round(w * sc), wh = Math.round(h * sc);
+  const wk = document.createElement("canvas"); wk.width = ww; wk.height = wh;
+  const wx = wk.getContext("2d", { willReadFrequently: true }); wx.imageSmoothingQuality = "high"; wx.drawImage(src, 0, 0, ww, wh);
+  const det = findTables(toGray(wx.getImageData(0, 0, ww, wh).data, ww * wh), ww, wh);
+  if (!det) return null;
+  const up = p => [p[0] / sc, p[1] / sc];
+  const full = src.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, w, h);
+  const tables = [], dark = [];
+  for (const k of ["L", "R"]) {
+    const img = warpTable(full.data, w, h, det[k].map(up), CW, CH);
+    tables.push(img);
+    dark.push(readDarkness(toGray(img.data, CW * CH), CW, CH));
+  }
+  return { tables, dark: dark[0].concat(dark[1]) };                  // dark[0..39][0..3]
+}
+/* An empty box is a light-grey bar, so a mark is judged against the typical empty box of the same table (35th percentile),
+   which also copes with uneven lighting between the two halves of the sheet. */
+function marksFromDark(dark, delta) {
+  const marks = [];
+  for (const half of [dark.slice(0, 20), dark.slice(20)]) {
+    const all = [].concat(...half).sort((a, b) => a - b), base = all[Math.floor(all.length * 0.35)];
+    half.forEach(r => { const m = []; r.forEach((s, c) => { if (s - base > delta) m.push(c); }); marks.push(m); });
+  }
+  return marks;
+}
+
+/* =====================================================================
+   STATE: keys, scans, settings
+   ===================================================================== */
+let keys = lsGet("ogs_keys", {});                // { name: "BADC..." (40 chars, '-' = unset) }
+let keyName = lsGet("ogs_key_current", "");
+let scans = lsGet("ogs_scans", []);
+let sens = lsGet("ogs_sens2", 12);              // percent darker than an empty box
+let autoCap = lsGet("ogs_auto", true);
+let mode = "score";                              // "score" | "key"
+let curResult = null;                            // { tables, dark, marks }
+
+const curKey = () => keys[keyName] || null;
+const keyComplete = k => !!k && /^[A-D]{40}$/.test(k);
+
+function scoreMarks(marks, key) {
+  let correct = 0, blank = 0, multi = 0, s1 = 0, s2 = 0; const answers = [];
+  marks.forEach((m, q) => {
+    if (m.length === 0) { blank++; answers.push("-"); }
+    else if (m.length > 1) { multi++; answers.push(m.map(i => LET[i]).join("")); }
+    else { answers.push(LET[m[0]]); if (key && LET[m[0]] === key[q]) { correct++; if (q < 20) s1++; else s2++; } }
+  });
+  return { correct, incorrect: 40 - correct, blank, multi, s1, s2, answers };
+}
+
+/* =====================================================================
+   RESULT SCREEN
+   ===================================================================== */
+const rcanvas = $("rcanvas"), rctx = rcanvas.getContext("2d");
+rcanvas.width = CW * 2 + GAP; rcanvas.height = CH;
+
+function drawResult() {
+  const r = curResult, key = curKey();
+  rctx.fillStyle = "#fff"; rctx.fillRect(0, 0, rcanvas.width, rcanvas.height);
+  rctx.putImageData(r.tables[0], 0, 0); rctx.putImageData(r.tables[1], CW + GAP, 0);
+  const useKey = mode === "score" && keyComplete(key);
+  rctx.lineJoin = "round";
+  r.marks.forEach((m, q) => {
+    const t = q < 20 ? 0 : 1, row = q % 20, ox = t * (CW + GAP), cy = (LAYOUT.row0 + LAYOUT.pitch * row) * SY;
+    const box = (c, color, dashed) => {
+      const cx = ox + LAYOUT.colX[c] * SX;
+      rctx.lineWidth = 3 * SX; rctx.strokeStyle = color; rctx.setLineDash(dashed ? [6 * SX, 4 * SX] : []);
+      rctx.strokeRect(cx - 15*SX, cy - 7.5*SY, 30*SX, 15*SY);
+    };
+    if (m.length === 1) {
+      if (!useKey) box(m[0], "#2f7de1");
+      else if (LET[m[0]] === key[q]) box(m[0], "#1fa84f");
+      else { box(m[0], "#d93636"); box("ABCD".indexOf(key[q]), "#1fa84f", true); }
+    } else {
+      m.forEach(c => box(c, "#e49b0f"));
+      if (m.length === 0) {                                   // blank row
+        rctx.setLineDash([]); rctx.fillStyle = "rgba(228,155,15,.16)"; rctx.fillRect(ox + 2, cy - 22*SY, CW - 4, 44*SY);
+      }
+      if (useKey) box("ABCD".indexOf(key[q]), "#1fa84f", true);
+    }
+  });
+  rctx.setLineDash([]);
+  const sc = scoreMarks(r.marks, useKey ? key : null);
+  $("rscore").innerHTML = useKey ? `${sc.correct} <small>/ 40</small>` : `– <small>/ 40</small>`;
+  $("rstats").innerHTML = useKey
+    ? `<b class="g">${sc.correct} correct</b> · <b class="r">${sc.incorrect} incorrect</b><br>of which ${sc.blank} blank, <b class="a">${sc.multi} multiple</b> · Q1-20: ${sc.s1} · Q21-40: ${sc.s2}`
+    : (mode === "key" ? `Reading key sheet – ${sc.blank} blank, ${sc.multi} multiple` : `<b class="r">No complete answer key selected</b> – open “Key” on the scan screen`);
+  return sc;
+}
+
+function showResult(res) {
+  curResult = { tables: res.tables, dark: res.dark, marks: marksFromDark(res.dark, sens / 100) };
+  $("rsid").value = $("sid").value;
+  $("saveBtn").textContent = mode === "key" ? "Use as answer key" : "Save & next";
+  $("scan").classList.add("hidden"); $("result").classList.remove("hidden");
+  stopLoop(); drawResult(); $("rscroll").scrollTop = 0;
+}
+
+rcanvas.addEventListener("click", e => {
+  if (!curResult) return;
+  const b = rcanvas.getBoundingClientRect(), x = (e.clientX - b.left) * rcanvas.width / b.width, y = (e.clientY - b.top) * rcanvas.height / b.height;
+  const t = x < CW + GAP / 2 ? 0 : 1, rx = (x - t * (CW + GAP)) / SX, ry = y / SY;
+  if (rx < 56 || rx > LAYOUT.TW) return;
+  const row = Math.min(19, Math.max(0, Math.floor(ry / LAYOUT.pitch)));
+  let c = 0, bd = 1e9; LAYOUT.colX.forEach((cx, i) => { const d = Math.abs(cx - rx); if (d < bd) { bd = d; c = i; } });
+  const q = t * 20 + row, m = curResult.marks[q];
+  curResult.marks[q] = (m.length === 1 && m[0] === c) ? [] : [c];
+  drawResult();
+});
+
+$("retakeBtn").onclick = () => backToScan(true);
+$("saveBtn").onclick = () => {
+  const r = curResult; if (!r) return;
+  if (mode === "key") {
+    if (r.marks.some(m => m.length !== 1)) { toast("Key sheet needs exactly one mark for every question"); return; }
+    const k = r.marks.map(m => LET[m[0]]).join("");
+    let name = keyName; if (!name || (keys[name] && keyComplete(keys[name]))) name = uniqueName("Scanned key");
+    keys[name] = k; keyName = name; persistKeys(); mode = "score"; toast("Answer key saved: " + name); backToScan(false); return;
+  }
+  const key = curKey();
+  if (!keyComplete(key)) { toast("Select a complete answer key first"); openKeyPanel(); return; }
+  const sc = scoreMarks(r.marks, key);
+  const id = $("rsid").value.trim() || ("Sheet " + (scans.length + 1));
+  scans.push({ ts: new Date().toISOString(), id, key: keyName, correct: sc.correct, incorrect: sc.incorrect, blank: sc.blank, multi: sc.multi, s1: sc.s1, s2: sc.s2, answers: sc.answers });
+  lsSet("ogs_scans", scans); $("sid").value = ""; updateCounts();
+  toast(`Saved ${id}: ${sc.correct}/40`); backToScan(false);
+};
+$("shareImgBtn").onclick = async () => {
+  rcanvas.toBlob(async blob => {
+    const f = new File([blob], `${$("rsid").value.trim() || "sheet"}.png`, { type: "image/png" });
+    try { if (navigator.canShare && navigator.canShare({ files: [f] })) await navigator.share({ files: [f] }); else downloadBlob(blob, f.name); } catch (e) {}
+  }, "image/png");
+};
+$("rsid").addEventListener("input", e => { $("sid").value = e.target.value; });
+
+function backToScan(retake) {
+  $("result").classList.add("hidden"); $("scan").classList.remove("hidden"); curResult = null;
+  cooldownUntil = performance.now() + 1800; if (camReady) startLoop();
+}
+
+/* =====================================================================
+   CAMERA + LIVE DETECTION + AUTO-CAPTURE
+   ===================================================================== */
+const vid = $("vid"), live = $("live"), lctx = live.getContext("2d");
+const wkc = document.createElement("canvas"), wkx = wkc.getContext("2d", { willReadFrequently: true });
+let stream = null, camReady = false, looping = false, lastDet = 0, detInfo = null, stableSince = 0, lastQuadKey = null, cooldownUntil = 0, torchOn = false, rafId = 0;
+
+function sizeLive() { const dpr = Math.min(window.devicePixelRatio || 1, 2); live.width = Math.round(innerWidth * dpr); live.height = Math.round(innerHeight * dpr); }
+addEventListener("resize", sizeLive); sizeLive();
+
+async function startCamera() {
+  try {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error("Camera API unavailable (the page must be opened over https).");
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    vid.srcObject = stream; await vid.play();
+    camReady = true; $("startOverlay").classList.add("hidden");
+    const track = stream.getVideoTracks()[0], caps = track.getCapabilities ? track.getCapabilities() : {};
+    if (caps.torch) { $("torchBtn").classList.remove("hidden"); $("torchSpacer").classList.add("hidden"); }
+    startLoop();
+  } catch (e) {
+    $("status").textContent = "Camera not available: " + (e.message || e.name) + ". Use the Photo button instead.";
+    $("startOverlay").classList.add("hidden");
+  }
+}
+$("startBtn").onclick = startCamera;
+$("startPhoto").onclick = () => $("photoInput").click();
+$("torchBtn").onclick = async () => {
+  try { torchOn = !torchOn; await stream.getVideoTracks()[0].applyConstraints({ advanced: [{ torch: torchOn }] }); } catch (e) { torchOn = false; }
+};
+
+function startLoop() { if (looping) return; looping = true; stableSince = 0; lastQuadKey = null; rafId = requestAnimationFrame(tick); }
+function stopLoop() { looping = false; cancelAnimationFrame(rafId); }
+
+function tick(now) {
+  if (!looping) return;
+  rafId = requestAnimationFrame(tick);
+  if (vid.readyState < 2 || !vid.videoWidth) return;
+  const vw = vid.videoWidth, vh = vid.videoHeight, cw = live.width, ch = live.height;
+  const k = Math.min(cw / vw, ch / vh), dw = vw * k, dh = vh * k, ox = (cw - dw) / 2, oy = (ch - dh) / 2;
+  lctx.fillStyle = "#000"; lctx.fillRect(0, 0, cw, ch); lctx.drawImage(vid, ox, oy, dw, dh);
+
+  if (now - lastDet > 200 && now > cooldownUntil) {
+    lastDet = now;
+    const sc = Math.min(1, 900 / Math.max(vw, vh)), ww = Math.round(vw * sc), wh = Math.round(vh * sc);
+    wkc.width = ww; wkc.height = wh; wkx.drawImage(vid, 0, 0, ww, wh);
+    const det = findTables(toGray(wkx.getImageData(0, 0, ww, wh).data, ww * wh), ww, wh);
+    if (det) {
+      const norm = p => [p[0] / ww, p[1] / wh], quads = { L: det.L.map(norm), R: det.R.map(norm) };
+      const flat = [].concat(...quads.L, ...quads.R), prev = lastQuadKey;
+      lastQuadKey = flat;
+      const moved = prev ? Math.max(...flat.map((v, i) => Math.abs(v - prev[i]))) : 1;
+      if (moved > 0.012) stableSince = now; else if (!stableSince) stableSince = now;
+      detInfo = { quads, t: now };
+    } else { detInfo = null; stableSince = 0; lastQuadKey = null; }
+  }
+
+  const fresh = detInfo && now - detInfo.t < 600;
+  let msg;
+  if (fresh) {
+    const dur = stableSince ? now - stableSince : 0, frac = Math.min(1, dur / 1000);
+    lctx.lineWidth = 4 * (window.devicePixelRatio || 1); lctx.strokeStyle = frac >= 1 ? "#1fa84f" : "#f5c542"; lctx.fillStyle = "rgba(31,168,79,.12)";
+    for (const key of ["L", "R"]) { const q = detInfo.quads[key]; lctx.beginPath(); q.forEach((p, i) => { const x = ox + p[0] * dw, y = oy + p[1] * dh; i ? lctx.lineTo(x, y) : lctx.moveTo(x, y); }); lctx.closePath(); lctx.fill(); lctx.stroke(); }
+    $("progFill").style.width = (autoCap ? frac * 100 : 0) + "%";
+    msg = autoCap ? (frac < 1 ? "Hold steady…" : "Capturing…") : "Sheet found – tap the shutter";
+    if (autoCap && frac >= 1 && now > cooldownUntil) { stableSince = 0; captureFromVideo(); }
+  } else {
+    $("progFill").style.width = "0";
+    msg = now < cooldownUntil ? "" : "Looking for the two answer columns…";
+    lctx.setLineDash([10, 8]); lctx.strokeStyle = "#ffffffaa"; lctx.lineWidth = 2;
+    const gh = dh * 0.78, gw = Math.min(dw * 0.92, gh * 0.78); lctx.strokeRect(cw / 2 - gw / 2, ch / 2 - gh / 2, gw, gh); lctx.setLineDash([]);
+  }
+  $("status").textContent = msg;
+}
+
+function captureFromVideo() {
+  const vw = vid.videoWidth, vh = vid.videoHeight; if (!vw) return;
+  const c = document.createElement("canvas"); c.width = vw; c.height = vh; c.getContext("2d").drawImage(vid, 0, 0);
+  processCanvas(c);
+}
+$("shutter").onclick = () => { if (camReady) captureFromVideo(); else $("photoInput").click(); };
+
+function processCanvas(c) {
+  let res = null;
+  try { res = analyzeCanvas(c); } catch (e) { console.error(e); }
+  if (!res) { toast("Couldn't find both answer columns – try again, a little further back and well lit", 3200); cooldownUntil = performance.now() + 1500; return; }
+  showResult(res);
+}
+
+/* photo from library / camera app */
+$("photoBtn").onclick = () => $("photoInput").click();
+$("photoInput").onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const url = URL.createObjectURL(f), img = new Image();
+  img.onload = () => {
+    const k = Math.min(1, 2400 / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement("canvas");
+    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    const cx = c.getContext("2d", { willReadFrequently: true }); cx.imageSmoothingQuality = "high"; cx.drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(url); $("startOverlay").classList.add("hidden"); processCanvas(c);
+  };
+  img.onerror = () => toast("Couldn't open that image");
+  img.src = url; e.target.value = "";
+};
+
+/* =====================================================================
+   KEY PANEL
+   ===================================================================== */
+function persistKeys() { lsSet("ogs_keys", keys); lsSet("ogs_key_current", keyName); updateKeyUI(); }
+function uniqueName(base) { let n = base, i = 2; while (keys[n]) n = base + " " + i++; return n; }
+function updateKeyUI() {
+  const k = curKey();
+  $("keyBtn").textContent = keyName ? "Key: " + keyName + (keyComplete(k) ? "" : " (incomplete)") : "Key: none";
+  const sel = $("keySelect"); sel.innerHTML = "";
+  const names = Object.keys(keys); if (!names.length) { const o = document.createElement("option"); o.textContent = "(no keys yet)"; o.value = ""; sel.appendChild(o); }
+  names.forEach(n => { const o = document.createElement("option"); o.value = n; o.textContent = n; if (n === keyName) o.selected = true; sel.appendChild(o); });
+  $("keyName").value = keyName;
+  const set = k ? [...k].filter(ch => ch !== "-").length : 0;
+  $("keyStatus").textContent = keyName ? `${set} of 40 answers set` + (set === 40 ? " – ready to score." : " – scoring needs all 40.") : "Create a key with New, upload a file, paste, or scan a marked sheet.";
+  const grid = $("keyGrid"); grid.innerHTML = "";
+  for (let t = 0; t < 2; t++) {
+    const col = document.createElement("div"); col.className = "col";
+    for (let i = 0; i < 20; i++) {
+      const q = t * 20 + i, v = k ? k[q] : "-", d = document.createElement("div");
+      d.className = "kc" + (v === "-" ? " unset" : ""); d.innerHTML = `<span>${q + 1}</span><b>${v === "-" ? "–" : v}</b>`;
+      d.onclick = () => { if (!keyName) { keyName = uniqueName("Key"); keys[keyName] = "-".repeat(40); }
+        const cur = keys[keyName][q], nxt = cur === "-" ? "A" : cur === "D" ? "-" : LET[LET.indexOf(cur) + 1];
+        keys[keyName] = keys[keyName].slice(0, q) + nxt + keys[keyName].slice(q + 1); persistKeys(); };
+      col.appendChild(d);
+    }
+    grid.appendChild(col);
+  }
+  $("sensVal").textContent = sens + " %"; $("sens").value = sens; $("autoCap").checked = autoCap;
+}
+function openKeyPanel() { updateKeyUI(); $("keyPanel").classList.remove("hidden"); }
+$("keyBtn").onclick = openKeyPanel;
+$("keyClose").onclick = () => $("keyPanel").classList.add("hidden");
+$("keySelect").onchange = e => { keyName = e.target.value; persistKeys(); };
+$("keyNew").onclick = () => { keyName = uniqueName("Key"); keys[keyName] = "-".repeat(40); persistKeys(); };
+$("keyDelete").onclick = () => { if (keyName && confirm(`Delete key “${keyName}”?`)) { delete keys[keyName]; keyName = Object.keys(keys)[0] || ""; persistKeys(); } };
+$("keyRename").onclick = () => { const n = $("keyName").value.trim(); if (!n || !keyName || n === keyName) return; if (keys[n]) { toast("That name is already used"); return; }
+  keys[n] = keys[keyName]; delete keys[keyName]; keyName = n; persistKeys(); };
+$("keyScan").onclick = () => { mode = "key"; $("keyPanel").classList.add("hidden"); toast("Scan the marked answer-key sheet", 2600); };
+$("sens").oninput = e => { sens = +e.target.value; lsSet("ogs_sens2", sens); $("sensVal").textContent = sens + " %"; };
+$("autoCap").onchange = e => { autoCap = e.target.checked; lsSet("ogs_auto", autoCap); };
+
+function parseKey(text) {
+  const pairs = {}; let m, re = /(?:^|[^\d])(\d{1,2})\s*[,;:.\-)\t ]+\s*([A-Da-d])(?![A-Za-z])/g;
+  while ((m = re.exec(text))) { const n = +m[1]; if (n >= 1 && n <= 40) pairs[n] = m[2].toUpperCase(); }
+  if (Object.keys(pairs).length >= 30) { let s = ""; for (let i = 1; i <= 40; i++) s += pairs[i] || "-"; return s; }
+  const toks = text.split(/[\s,;|]+/).filter(t => /^[A-Da-d]$/.test(t)); if (toks.length === 40) return toks.join("").toUpperCase();
+  const compact = text.replace(/[\s,;|]+/g, ""); if (/^[A-Da-d]{40}$/.test(compact)) return compact.toUpperCase();
+  return null;
+}
+function importKeyText(text, label) {
+  const k = parseKey(text); if (!k) { toast("Couldn't read 40 answers from that"); return; }
+  const name = uniqueName(label || "Imported key"); keys[name] = k; keyName = name; persistKeys(); toast("Key loaded: " + name);
+}
+$("keyUpload").onclick = () => $("keyFile").click();
+$("keyFile").onchange = async e => { const f = e.target.files[0]; if (!f) return; importKeyText(await f.text(), f.name.replace(/\.[^.]+$/, "")); e.target.value = ""; };
+$("keyPaste").onclick = () => { const t = prompt("Paste the answer key (40 letters, a list, or rows like 1,B):"); if (t) importKeyText(t, "Pasted key"); };
+
+/* =====================================================================
+   SCANS LIST + CSV
+   ===================================================================== */
+function updateCounts() { $("listBtn").textContent = scans.length + (scans.length === 1 ? " scan" : " scans"); }
+function csvEscape(v) { v = String(v); return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+function buildCsv() {
+  const head = ["Timestamp", "ID", "Key", "Correct", "Incorrect", "Blank", "Multiple (flagged)", "Correct Q1-20", "Correct Q21-40", "Total (out of 40)"];
+  for (let i = 1; i <= 40; i++) head.push("Q" + i);
+  const rows = scans.map(s => [s.ts, s.id, s.key, s.correct, s.incorrect, s.blank, s.multi, s.s1, s.s2, s.correct + "/40"].concat(s.answers));
+  return "﻿" + [head].concat(rows).map(r => r.map(csvEscape).join(",")).join("\r\n") + "\r\n";
+}
+function csvName() { const d = new Date(), p = n => String(n).padStart(2, "0"); return `scores_${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.csv`; }
+function downloadBlob(blob, name) { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000); }
+function renderScans() {
+  $("listTitle").textContent = `Scans (${scans.length})`;
+  const t = $("scanTable"); t.innerHTML = "<tr><th>ID</th><th>Key</th><th style='text-align:right'>Score</th><th style='text-align:right'>Blank/Multi</th></tr>";
+  scans.slice().reverse().forEach(s => { const r = t.insertRow(); r.innerHTML = `<td></td><td></td><td class="n"><b>${s.correct}</b>/40</td><td class="n">${s.blank}/${s.multi}</td>`; r.cells[0].textContent = s.id; r.cells[1].textContent = s.key; });
+  if (!scans.length) { const r = t.insertRow(); r.innerHTML = `<td colspan="4" class="note">No scans saved yet.</td>`; }
+}
+$("listBtn").onclick = () => { renderScans(); $("listPanel").classList.remove("hidden"); };
+$("listClose").onclick = () => $("listPanel").classList.add("hidden");
+$("csvShare").onclick = async () => {
+  if (!scans.length) { toast("Nothing to export yet"); return; }
+  const name = csvName(), blob = new Blob([buildCsv()], { type: "text/csv" }), file = new File([blob], name, { type: "text/csv" });
+  try { if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: name }); else downloadBlob(blob, name); }
+  catch (e) { if (e.name !== "AbortError") downloadBlob(blob, name); }
+};
+$("csvDownload").onclick = () => { if (!scans.length) { toast("Nothing to export yet"); return; } downloadBlob(new Blob([buildCsv()], { type: "text/csv" }), csvName()); };
+$("undoLast").onclick = () => { if (scans.length) { scans.pop(); lsSet("ogs_scans", scans); updateCounts(); renderScans(); } };
+$("clearAll").onclick = () => { if (scans.length && confirm(`Delete all ${scans.length} saved scans? Export first if you need them.`)) { scans = []; lsSet("ogs_scans", scans); updateCounts(); renderScans(); } };
+
+$("sid").addEventListener("keydown", e => { if (e.key === "Enter") e.target.blur(); });
+
+updateCounts(); updateKeyUI();
+$("status").textContent = "Tap “Start camera”";
+
+/* test / debugging hook */
+window.__ogs = { analyzeCanvas, marksFromDark, scoreMarks, parseKey, buildCsv, LAYOUT, processCanvas, get state() { return { keys, keyName, scans, curResult }; } };
+</script>
+</body>
+</html>
